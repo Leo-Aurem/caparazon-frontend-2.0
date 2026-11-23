@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import api from '../services/api'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
@@ -8,6 +8,13 @@ import Chatbot from '../components/Chatbot.vue'
 const locatarios = ref([])
 const router = useRouter()
 const auth = useAuthStore()
+
+// Filtros del directorio
+const busqueda = ref('')
+const rubroSeleccionado = ref('Todos')
+
+// Modal de detalle de negocio
+const negocioSeleccionado = ref(null)
 
 // Variables para el Login Modal
 const mostrarLogin = ref(false)
@@ -24,6 +31,26 @@ onMounted(async () => {
     console.error("Error al cargar locatarios", e)
   }
 })
+
+const rubrosUnicos = computed(() => {
+  const set = new Set(locatarios.value.map(l => l.rubro).filter(Boolean))
+  return ['Todos', ...Array.from(set)]
+})
+
+const locatariosFiltrados = computed(() => {
+  return locatarios.value.filter(loc => {
+    const coincideTexto = !busqueda.value || 
+      (loc.nombre || '').toLowerCase().includes(busqueda.value.toLowerCase()) ||
+      (loc.rubro || '').toLowerCase().includes(busqueda.value.toLowerCase()) ||
+      (loc.descripcion || '').toLowerCase().includes(busqueda.value.toLowerCase())
+    const coincideRubro = rubroSeleccionado.value === 'Todos' || loc.rubro === rubroSeleccionado.value
+    return coincideTexto && coincideRubro
+  })
+})
+
+const abrirDetalleNegocio = (loc) => {
+  negocioSeleccionado.value = loc
+}
 
 const handleLogin = async () => {
   cargando.value = true
@@ -85,7 +112,22 @@ const handleLogin = async () => {
     <main class="pub-main">
       <div class="section-head">
         <h2>Directorio de Tiendas</h2>
-        <p>Encuentra tu tienda favorita y su información de contacto.</p>
+        <p>Haz clic en cualquier negocio para ver su ubicación, horarios y detalles completos.</p>
+      </div>
+
+      <!-- Barra de búsqueda y filtro -->
+      <div v-if="locatarios.length > 0" class="filter-bar">
+        <input 
+          v-model="busqueda" 
+          type="text" 
+          class="filter-input" 
+          placeholder="Buscar tienda por nombre o servicio..." 
+        />
+        <select v-model="rubroSeleccionado" class="filter-select">
+          <option v-for="rubro in rubrosUnicos" :key="rubro" :value="rubro">
+            {{ rubro === 'Todos' ? 'Todos los rubros' : rubro }}
+          </option>
+        </select>
       </div>
 
       <div v-if="locatarios.length === 0" class="card empty">
@@ -95,8 +137,17 @@ const handleLogin = async () => {
         <p>Cargando el directorio de tiendas…</p>
       </div>
 
+      <div v-else-if="locatariosFiltrados.length === 0" class="card empty">
+        <p>No se encontraron negocios con ese criterio de búsqueda.</p>
+      </div>
+
       <div v-else class="grid grid-cards">
-        <article v-for="loc in locatarios" :key="loc.id" class="shop">
+        <article 
+          v-for="loc in locatariosFiltrados" 
+          :key="loc.id" 
+          class="shop clickable"
+          @click="abrirDetalleNegocio(loc)"
+        >
           <div class="shop-top">
             <div class="shop-avatar">{{ (loc.nombre || '?').charAt(0).toUpperCase() }}</div>
             <span class="badge badge-green"><i class="live"></i> Abierto</span>
@@ -107,8 +158,11 @@ const handleLogin = async () => {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z" />
             </svg>
-            {{ loc.telefono }}
+            {{ loc.telefono || 'Sin teléfono registrado' }}
           </p>
+          <div class="shop-more">
+            <span>Ver información del negocio →</span>
+          </div>
         </article>
       </div>
     </main>
@@ -117,6 +171,66 @@ const handleLogin = async () => {
       <strong>Mall Center Caparazón</strong>
       <span>Zona La Vita, cerca al Puente Vita · La Paz, Bolivia</span>
     </footer>
+
+    <!-- Modal de Detalle del Negocio -->
+    <div v-if="negocioSeleccionado" class="modal-backdrop" @click.self="negocioSeleccionado = null">
+      <div class="modal detail-modal">
+        <button class="close" @click="negocioSeleccionado = null" aria-label="Cerrar">×</button>
+        
+        <div class="detail-head">
+          <div class="shop-avatar big">{{ (negocioSeleccionado.nombre || '?').charAt(0).toUpperCase() }}</div>
+          <div>
+            <span class="badge badge-slate">{{ negocioSeleccionado.rubro || 'Comercio General' }}</span>
+            <h2>{{ negocioSeleccionado.nombre }}</h2>
+          </div>
+        </div>
+
+        <p class="detail-desc">
+          {{ negocioSeleccionado.descripcion || negocioSeleccionado.observaciones || 'Local comercial autorizado dentro del Mall Center Caparazón. Visítanos para conocer nuestros productos y promociones vigentes.' }}
+        </p>
+
+        <div class="detail-grid">
+          <div class="detail-item">
+            <span class="detail-label">Ubicación / Local</span>
+            <strong>
+              {{ negocioSeleccionado.espacio?.codigo ? `Local ${negocioSeleccionado.espacio.codigo} (${negocioSeleccionado.espacio.piso || 'Planta Principal'})` : (negocioSeleccionado.ubicacion || 'Planta Comercial - Mall Caparazón') }}
+            </strong>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Teléfono de Contacto</span>
+            <strong>{{ negocioSeleccionado.telefono || 'No disponible' }}</strong>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Correo Electrónico</span>
+            <strong>{{ negocioSeleccionado.email || negocioSeleccionado.correo || 'contacto@caparazon.bo' }}</strong>
+          </div>
+
+          <div class="detail-item">
+            <span class="detail-label">Horario de Atención</span>
+            <strong>{{ negocioSeleccionado.horario || 'Lunes a Domingo · 09:00 a 21:00' }}</strong>
+          </div>
+
+          <div v-if="negocioSeleccionado.propietario || negocioSeleccionado.representante" class="detail-item full">
+            <span class="detail-label">Responsable / Representante</span>
+            <strong>{{ negocioSeleccionado.propietario || negocioSeleccionado.representante }}</strong>
+          </div>
+        </div>
+
+        <div class="detail-actions">
+          <a 
+            v-if="negocioSeleccionado.telefono" 
+            :href="`tel:${negocioSeleccionado.telefono}`" 
+            class="btn submit"
+            style="text-align: center; text-decoration: none;"
+          >
+            Llamar al negocio
+          </a>
+          <button type="button" class="btn btn-secondary" @click="negocioSeleccionado = null">Cerrar</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Modal de Login -->
     <div v-if="mostrarLogin" class="modal-backdrop" @click.self="mostrarLogin = false">
@@ -197,25 +311,33 @@ const handleLogin = async () => {
 .hero-stat strong { font-size: 2rem; font-weight: 800; color: #fff; }
 .hero-stat span { color: #a5b4fc; font-size: .9rem; }
 
-/* ---------- Directorio ---------- */
+/* ---------- Directorio y Filtros ---------- */
 .pub-main { flex: 1; width: 100%; max-width: 1200px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
-.section-head { text-align: center; margin-bottom: 2.2rem; }
+.section-head { text-align: center; margin-bottom: 1.8rem; }
 .section-head h2 { font-size: 1.7rem; font-weight: 800; letter-spacing: -.02em; }
 .section-head p { margin-top: .4rem; color: var(--slate-500, #64748b); }
+
+.filter-bar { display: flex; gap: .8rem; max-width: 680px; margin: 0 auto 2rem; flex-wrap: wrap; }
+.filter-input { flex: 1; min-width: 220px; margin-bottom: 0; background: #fff; }
+.filter-select { width: auto; min-width: 190px; padding: .7rem .9rem; border: 1px solid var(--slate-200, #e2e8f0); border-radius: 10px; background: #fff; color: var(--slate-700, #334155); font-size: .92rem; }
 
 .shop {
   position: relative; padding: 1.35rem; background: #fff; border: 1px solid var(--slate-200, #e2e8f0); border-radius: 14px;
   box-shadow: var(--shadow-sm); transition: transform .22s var(--ease), box-shadow .22s var(--ease), border-color .22s var(--ease);
+  display: flex; flex-direction: column;
 }
+.shop.clickable { cursor: pointer; }
 .shop::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; border-radius: 14px 14px 0 0; background: linear-gradient(90deg, #6366f1, #8b5cf6); opacity: 0; transition: opacity .22s; }
 .shop:hover { transform: translateY(-4px); box-shadow: 0 16px 32px -12px rgba(79, 70, 229, .25); border-color: var(--indigo-300, #a5b4fc); }
 .shop:hover::before { opacity: 1; }
 .shop-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
-.shop-avatar { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; font-weight: 800; font-size: 1.2rem; color: var(--indigo-700, #4338ca); background: var(--indigo-50, #eef2ff); }
+.shop-avatar { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; font-weight: 800; font-size: 1.2rem; color: var(--indigo-700, #4338ca); background: var(--indigo-50, #eef2ff); flex-shrink: 0; }
+.shop-avatar.big { width: 58px; height: 58px; font-size: 1.5rem; border-radius: 16px; }
 .shop h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: .55rem; }
 .shop-rubro { margin-bottom: .9rem; }
 .shop-contact { display: flex; align-items: center; gap: .5rem; color: var(--slate-600, #475569); font-size: .88rem; }
 .shop-contact svg { width: 15px; height: 15px; color: var(--slate-400, #94a3b8); flex-shrink: 0; }
+.shop-more { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--slate-100, #f1f5f9); font-size: .82rem; font-weight: 600; color: var(--indigo-600, #4f46e5); }
 .live { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, .25); }
 
 .empty { display: grid; justify-items: center; gap: .8rem; padding: 3rem 1rem; color: var(--slate-500, #64748b); text-align: center; }
@@ -223,6 +345,21 @@ const handleLogin = async () => {
 
 .pub-foot { display: flex; flex-direction: column; align-items: center; gap: .25rem; padding: 1.8rem 1rem; text-align: center; color: #94a3b8; font-size: .85rem; background: #0f172a; }
 .pub-foot strong { color: #e2e8f0; }
+
+/* ---------- Modal de Detalle del Negocio ---------- */
+.detail-modal { position: relative; max-width: 520px; padding: 2rem; }
+.detail-head { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; padding-right: 1.5rem; }
+.detail-head h2 { font-size: 1.45rem; font-weight: 800; margin-top: .35rem; line-height: 1.2; }
+.detail-desc { color: var(--slate-600, #475569); font-size: .94rem; line-height: 1.55; margin-bottom: 1.4rem; padding: .9rem 1rem; background: var(--slate-50, #f8fafc); border-radius: 10px; border: 1px solid var(--slate-100, #f1f5f9); }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.6rem; }
+.detail-item { display: flex; flex-direction: column; gap: .2rem; }
+.detail-item.full { grid-column: 1 / -1; }
+.detail-label { font-size: .76rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--slate-400, #94a3b8); }
+.detail-item strong { font-size: .92rem; color: var(--slate-800, #1e293b); }
+.detail-actions { display: flex; gap: .8rem; }
+.detail-actions > * { flex: 1; }
+.btn-secondary { background: var(--slate-100, #f1f5f9); color: var(--slate-700, #334155); border: 1px solid var(--slate-200, #e2e8f0); box-shadow: none; }
+.btn-secondary:hover { background: var(--slate-200, #e2e8f0); }
 
 /* ---------- Modal de login ---------- */
 .login-modal { position: relative; max-width: 420px; padding: 2.2rem 2rem 2rem; }
@@ -240,5 +377,6 @@ const handleLogin = async () => {
 @media (max-width: 560px) {
   .hero { padding: 3rem 1rem 3.5rem; }
   .pub-login { padding: .55rem .8rem; }
+  .detail-grid { grid-template-columns: 1fr; }
 }
 </style>

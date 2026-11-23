@@ -9,12 +9,36 @@ const espacios = ref([])
 const cargando = ref(true)
 const mostrarModal = ref(false)
 const contratoEditando = ref(null)
+const errorValidacion = ref('')
 
 const form = ref({ 
   locatario_id: '', espacio_id: '', codigo: '', 
   fecha_inicio: '', fecha_fin: '', monto_mensual: '', 
   estado: 'Vigente', observaciones: '' 
 })
+
+// Funci贸n de validaci贸n (RF-12 y formalizaci贸n de espacio) - Complejidad Ciclom谩tica V(G) = 6
+const validarContrato = (datos, listaEspacios, esEdicion) => {
+  if (!datos.codigo || !datos.locatario_id || !datos.espacio_id) {
+    return 'Complete los campos obligatorios (c贸digo, locatario y espacio).'
+  }
+  if (!datos.fecha_inicio || !datos.fecha_fin) {
+    return 'Debe especificar las fechas de inicio y fin del contrato.'
+  }
+  if (new Date(datos.fecha_fin) <= new Date(datos.fecha_inicio)) {
+    return 'La fecha de fin debe ser posterior a la fecha de inicio.'
+  }
+  if (Number(datos.monto_mensual) <= 0) {
+    return 'El monto mensual debe ser mayor a 0.'
+  }
+  if (!esEdicion) {
+    const espacioSeleccionado = listaEspacios.find(e => e.id === datos.espacio_id)
+    if (espacioSeleccionado && espacioSeleccionado.estado === 'Ocupado') {
+      return 'El espacio seleccionado ya se encuentra ocupado.'
+    }
+  }
+  return null
+}
 
 const cargarDatos = async () => {
   cargando.value = true
@@ -35,6 +59,7 @@ const cargarDatos = async () => {
 }
 
 const abrirModal = (con = null) => {
+  errorValidacion.value = ''
   if (con) {
     contratoEditando.value = con.id
     form.value = { 
@@ -50,6 +75,13 @@ const abrirModal = (con = null) => {
 }
 
 const guardar = async () => {
+  errorValidacion.value = ''
+  const error = validarContrato(form.value, espacios.value, Boolean(contratoEditando.value))
+  if (error) {
+    errorValidacion.value = error
+    return
+  }
+
   try {
     if (contratoEditando.value) {
       await api.put(`/contratos/${contratoEditando.value}`, form.value)
@@ -59,32 +91,33 @@ const guardar = async () => {
     mostrarModal.value = false
     cargarDatos()
   } catch (e) {
-    alert('Error al guardar. Revisa los datos.')
+    errorValidacion.value = e.response?.data?.message || 'Error al guardar. Revisa los datos.'
   }
 }
 
 const eliminar = async (id) => {
-  if (confirm('縀liminar este contrato?')) {
+  if (confirm('驴Eliminar este contrato?')) {
     await api.delete(`/contratos/${id}`)
     cargarDatos()
   }
 }
 
 onMounted(cargarDatos)
+defineExpose({ validarContrato, form, guardar, abrirModal, errorValidacion })
 </script>
 
 <template>
   <MainLayout>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-      <h2 style="margin: 0;">Gesti髇 de Contratos</h2>
-      <button @click="abrirModal()" style="width: auto; padding: 0.5rem 1rem; background-color: #16a34a;">+ Nuevo Contrato</button>
+      <h2 style="margin: 0;">Gesti贸n de Contratos</h2>
+      <button data-testid="btn-nuevo-contrato" @click="abrirModal()" style="width: auto; padding: 0.5rem 1rem; background-color: #16a34a;">+ Nuevo Contrato</button>
     </div>
 
     <div class="card" style="max-width: 100%; padding: 0; overflow-x: auto;">
       <table style="width: 100%; border-collapse: collapse; text-align: left;">
         <thead style="background-color: #f9fafb; border-bottom: 1px solid #e5e7eb;">
           <tr>
-            <th style="padding: 1rem;">C骴igo</th>
+            <th style="padding: 1rem;">C贸digo</th>
             <th style="padding: 1rem;">Locatario</th>
             <th style="padding: 1rem;">Espacio</th>
             <th style="padding: 1rem;">Vencimiento</th>
@@ -115,31 +148,36 @@ onMounted(cargarDatos)
     </div>
 
     <!-- Modal -->
-    <div v-if="mostrarModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50;">
+    <div v-if="mostrarModal" data-testid="modal-contrato" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50;">
       <div class="card" style="max-width: 500px;">
         <h3 style="margin-top: 0;">{{ contratoEditando ? 'Editar Contrato' : 'Nuevo Contrato' }}</h3>
-        <form @submit.prevent="guardar">
-          <input v-model="form.codigo" placeholder="C骴igo (Ej. C-001)" required />
+        
+        <div v-if="errorValidacion" data-testid="mensaje-error" style="background: #fee2e2; color: #991b1b; padding: 0.75rem; border-radius: 4px; margin-bottom: 1rem; font-size: 0.875rem;">
+          {{ errorValidacion }}
+        </div>
+
+        <form @submit.prevent="guardar" data-testid="form-contrato">
+          <input data-testid="input-codigo" v-model="form.codigo" placeholder="C贸digo (Ej. C-001)" required />
           
-          <select v-model="form.locatario_id" required style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
+          <select data-testid="select-locatario" v-model="form.locatario_id" required style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
             <option value="" disabled>Seleccione Locatario</option>
             <option v-for="loc in locatarios" :key="loc.id" :value="loc.id">{{ loc.nombre }}</option>
           </select>
 
-          <select v-model="form.espacio_id" required style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
+          <select data-testid="select-espacio" v-model="form.espacio_id" required style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
             <option value="" disabled>Seleccione Espacio</option>
             <option v-for="esp in espacios" :key="esp.id" :value="esp.id">{{ esp.codigo }} ({{ esp.piso }})</option>
           </select>
 
           <label style="font-size: 0.875rem;">Fecha Inicio:</label>
-          <input v-model="form.fecha_inicio" type="date" required />
+          <input data-testid="input-fecha-inicio" v-model="form.fecha_inicio" type="date" required />
           
           <label style="font-size: 0.875rem;">Fecha Fin:</label>
-          <input v-model="form.fecha_fin" type="date" required />
+          <input data-testid="input-fecha-fin" v-model="form.fecha_fin" type="date" required />
           
-          <input v-model="form.monto_mensual" type="number" placeholder="Monto Mensual (Bs.)" required />
+          <input data-testid="input-monto" v-model="form.monto_mensual" type="number" placeholder="Monto Mensual (Bs.)" required />
           
-          <select v-model="form.estado" style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
+          <select data-testid="select-estado" v-model="form.estado" style="width: 100%; padding: 0.75rem; margin-bottom: 1rem; border: 1px solid #d1d5db; border-radius: 4px;">
             <option value="Vigente">Vigente</option>
             <option value="Por vencer">Por vencer</option>
             <option value="Vencido">Vencido</option>
@@ -148,7 +186,7 @@ onMounted(cargarDatos)
 
           <div style="display: flex; gap: 1rem; margin-top: 1rem;">
             <button type="button" @click="mostrarModal = false" style="background-color: #6b7280;">Cancelar</button>
-            <button type="submit" style="background-color: #2563eb;">Guardar</button>
+            <button data-testid="btn-guardar" type="submit" style="background-color: #2563eb;">Guardar</button>
           </div>
         </form>
       </div>
